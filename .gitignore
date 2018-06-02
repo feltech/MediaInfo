@@ -1,0 +1,5 @@
+build
+dist
+MediaInfo.egg-info
+create_dev_link.sh
+.session.vim
