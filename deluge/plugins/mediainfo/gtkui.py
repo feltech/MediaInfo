@@ -29,6 +29,7 @@ from .common import get_resource
 
 log = logging.getLogger(__name__)
 
+
 class GtkUI(GtkPluginBase):
 
     def enable(self):
@@ -55,16 +56,13 @@ class GtkUI(GtkPluginBase):
         self.tab.listview.append_column(self._column)
 
     def disable(self):
-        log.info("XX Disabling MediaInfo UI")
         self.tab.listview.remove_column(self._column)
         self._column = None
         component.get('Preferences').remove_page('MediaInfo')
         component.get('PluginManager').deregister_hook('on_apply_prefs', self.on_apply_prefs)
         component.get('PluginManager').deregister_hook('on_show_prefs', self.on_show_prefs)
-        log.info("XX Disabled MediaInfo UI")
 
     def update(self):
-        log.info("XX UI update enter")
         if self.tab.torrent_id is None:
             return
         if (
@@ -76,7 +74,6 @@ class GtkUI(GtkPluginBase):
         client.mediainfo.get_info(self.tab.torrent_id).addCallback(
             lambda media_info: self._cb_get_media_info(media_info, self.tab.torrent_id)
         )
-        log.info("XX UI update exit")
 
     def on_apply_prefs(self):
         log.info('Applying prefs for MediaInfo')
@@ -89,7 +86,8 @@ class GtkUI(GtkPluginBase):
         client.mediainfo.get_config().addCallback(self._cb_get_config)
 
     def _cb_get_config(self, config):
-        """callback for on show_prefs"""
+        """ Callback for on show_prefs
+        """
         self._glade.get_widget('txt_ffprobe_bin').set_text(config['ffprobe_bin'])
 
     def _cb_get_media_info(self, media_info, torrent_id):
@@ -97,26 +95,31 @@ class GtkUI(GtkPluginBase):
             return
         if torrent_id != self.tab.torrent_id:
             return
-        log.info("_cb_get_media_info enter")
         prev_info = self.media_info.get(torrent_id)
         self.media_info[torrent_id] = media_info
         if prev_info != media_info:
             self.tab.listview.queue_draw()
-        log.info("_cb_get_media_info exit")
 
 
 def cell_data_media(column, cell, model, row, data):
-    log.info("XX cell_data_media enter")
     # This is a folder, so lets just set it blank for now
     if model.get_value(row, 5) == -1:
         cell.set_property('text', '')
         return
+    # No media info for this torrent available yet.
     media_info = data.media_info.get(data.tab.torrent_id)
     if media_info is None:
         cell.set_property('text', '...')
         return
-
-    filename = data.tab.get_file_path(row)
-    cell.set_property('text', media_info['files'][filename])
-    log.info("XX cell_data_media exit")
+    file_media_info = media_info['files'][data.tab.get_file_path(row)]
+    # File didn't pass file extension regex, so not even checked.
+    if file_media_info is False:
+        cell.set_property('text', '')
+        return
+    # File is awaiting a positive result from ffprobe.
+    if file_media_info is None:
+        cell.set_property('text', '...')
+        return
+    # ffprobe complete, show results.
+    cell.set_property('text', file_media_info)
 
