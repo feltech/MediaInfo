@@ -33,27 +33,32 @@ log = logging.getLogger(__name__)
 class GtkUI(GtkPluginBase):
 
     def enable(self):
-        self.media_info = {}
-        self._glade = gtk.glade.XML(get_resource('config.glade'))
+        try:
+            log.info("Enabling MediaInfo GTK plugin")
+            self.media_info = {}
+            self._glade = gtk.glade.XML(get_resource('config.glade'))
 
-        component.get('Preferences').add_page('MediaInfo', self._glade.get_widget('prefs_box'))
-        component.get('PluginManager').register_hook('on_apply_prefs', self.on_apply_prefs)
-        component.get('PluginManager').register_hook('on_show_prefs', self.on_show_prefs)
+            component.get('Preferences').add_page('MediaInfo', self._glade.get_widget('prefs_box'))
+            component.get('PluginManager').register_hook('on_apply_prefs', self.on_apply_prefs)
+            component.get('PluginManager').register_hook('on_show_prefs', self.on_show_prefs)
 
-        # Media column
-        self._column = gtk.TreeViewColumn(_('Media Streams'))
-        render = gtk.CellRendererText()
-        self._column.pack_start(render, False)
-        self._column.set_cell_data_func(render, cell_data_media, self)
-        self._column.set_sort_column_id(5)
-        self._column.set_clickable(True)
-        self._column.set_resizable(True)
-        self._column.set_expand(False)
-        self._column.set_min_width(50)
-        self._column.set_reorderable(True)
+            # Media column
+            self._column = gtk.TreeViewColumn(_('Media Streams'))
+            render = gtk.CellRendererText()
+            self._column.pack_start(render, False)
+            self._column.set_cell_data_func(render, cell_data_media, self)
+            self._column.set_sort_column_id(5)
+            self._column.set_clickable(True)
+            self._column.set_resizable(True)
+            self._column.set_expand(False)
+            self._column.set_min_width(50)
+            self._column.set_reorderable(True)
 
-        self.tab = component.get('TorrentDetails').tabs['Files']
-        self.tab.listview.append_column(self._column)
+            self.tab = component.get('TorrentDetails').tabs['Files']
+            self.tab.listview.append_column(self._column)
+        except Exception:
+            log.exception("Error enabling")
+            raise
 
     def disable(self):
         self.tab.listview.remove_column(self._column)
@@ -63,17 +68,21 @@ class GtkUI(GtkPluginBase):
         component.get('PluginManager').deregister_hook('on_show_prefs', self.on_show_prefs)
 
     def update(self):
-        if self.tab.torrent_id is None:
-            return
-        if (
-            self.media_info.get(self.tab.torrent_id) and
-            self.media_info[self.tab.torrent_id]['complete']
-        ):
-            return
+        try:
+            if self.tab.torrent_id is None:
+                return
+            if (
+                self.media_info.get(self.tab.torrent_id) and
+                self.media_info[self.tab.torrent_id]['complete']
+            ):
+                return
 
-        client.mediainfo.get_info(self.tab.torrent_id).addCallback(
-            lambda media_info: self._cb_get_media_info(media_info, self.tab.torrent_id)
-        )
+            client.mediainfo.get_info(self.tab.torrent_id).addCallback(
+                lambda media_info: self._cb_get_media_info(media_info, self.tab.torrent_id)
+            )
+        except Exception:
+            log.exception("Error updating media info (gtk)")
+            raise
 
     def on_apply_prefs(self):
         log.info('Applying prefs for MediaInfo')
@@ -102,24 +111,28 @@ class GtkUI(GtkPluginBase):
 
 
 def cell_data_media(column, cell, model, row, data):
-    # This is a folder, so lets just set it blank for now
-    if model.get_value(row, 5) == -1:
-        cell.set_property('text', '')
-        return
-    # No media info for this torrent available yet.
-    media_info = data.media_info.get(data.tab.torrent_id)
-    if media_info is None:
-        cell.set_property('text', '...')
-        return
-    file_media_info = media_info['files'][data.tab.get_file_path(row)]
-    # File didn't pass file extension regex, so not even checked.
-    if file_media_info is False:
-        cell.set_property('text', '')
-        return
-    # File is awaiting a positive result from ffprobe.
-    if file_media_info is None:
-        cell.set_property('text', '...')
-        return
-    # ffprobe complete, show results.
-    cell.set_property('text', file_media_info)
+    try:
+        # This is a folder, so lets just set it blank for now
+        if model.get_value(row, 5) == -1:
+            cell.set_property('text', '')
+            return
+        # No media info for this torrent available yet.
+        media_info = data.media_info.get(data.tab.torrent_id)
+        if media_info is None:
+            cell.set_property('text', '...')
+            return
+        file_media_info = media_info['files'][data.tab.get_file_path(row)]
+        # File didn't pass file extension regex, so not even checked.
+        if file_media_info is False:
+            cell.set_property('text', '')
+            return
+        # File is awaiting a positive result from ffprobe.
+        if file_media_info is None:
+            cell.set_property('text', '...')
+            return
+        # ffprobe complete, show results.
+        cell.set_property('text', file_media_info['streams'])
+    except Exception:
+        log.exception("Error rendering media info")
+        raise
 

@@ -39,12 +39,13 @@ DEFAULT_PREFS = {
 
 class Core(CorePluginBase):
     def enable(self):
-        log.info("Enabling MediaInfo plugin")
+        log.info("Enabling MediaInfo Core plugin")
         self._config = deluge.configmanager.ConfigManager('mediainfo.conf', DEFAULT_PREFS)
         self._core = component.get('Core')
         self._plugin = component.get('CorePluginManager')
         self._torrent_id = None
         self._media_info = {}
+        component.start([self._component_name])
 
     def disable(self):
         self._media_info = {}
@@ -65,16 +66,23 @@ class Core(CorePluginBase):
 
     @export
     def get_info(self, torrent_id):
-        self._torrent_id = torrent_id
-        return self._media_info[torrent_id].copy() if torrent_id in self._media_info else None
+        try:
+            self._torrent_id = torrent_id
+            return self._media_info[torrent_id].copy() if torrent_id in self._media_info else None
+        except Exception:
+            log.exception("Failed to get media info for torrent id %s" % torrent_id)
+            return None
 
     def update(self):
-        log.info("Updating MediaInfo")
-        media_info = self._get_media_info(self._torrent_id)
-        # If we have files, but we don't have media info for all of them yet.
-        if media_info is not None and not media_info['complete']:
-            # Async query for media info for all elligible files.
-            self._query_media_info(media_info)
+        try:
+            media_info = self._get_media_info(self._torrent_id)
+            # If we have files, but we don't have media info for all of them yet.
+            if media_info is not None and not media_info['complete']:
+                # Async query for media info for all elligible files.
+                self._query_media_info(media_info)
+        except Exception:
+            log.exception("Error updating media info (core)")
+            raise
 
     def _get_media_info(self, torrent_id):
         if torrent_id is None:
@@ -102,7 +110,7 @@ class Core(CorePluginBase):
         files = media_info['files']
         is_complete = True
         for path in files:
-            if files[path] is not None:
+            if files[path] and files[path]['complete']:
                 continue
             # Check if file extension indicates a supported (video) file.
             if not video_exts.match(os.path.splitext(path)[1]):
@@ -111,25 +119,32 @@ class Core(CorePluginBase):
             is_complete = False
             fullpath = os.path.join(root, path)
             cmd_args = [
-                "-v", "quiet", "-print_format", "json", "-show_streams", fullpath
+                "-k", "3", "2", self._config['ffprobe_bin'], "-v", "quiet", "-print_format",
+                "json", "-show_streams", fullpath
             ]
             log.info("Executing: %s with %s" % (self._config['ffprobe_bin'], cmd_args))
             getProcessOutputAndValue(
-                self._config['ffprobe_bin'], cmd_args, env=os.environ
+                "timeout", cmd_args, env=os.environ
             ).addCallback(self._update_file_in_media_info, media_info, path)
 
         media_info['complete'] = is_complete
 
     def _update_file_in_media_info(self, result, media_info, path):
         out, err, code = result
-        if code:
+        if code == 124:
+            log.warn("ffprobe terminated (timed out)")
+        elif code == 137:
+            log.warn("ffprobe killed (timed out and refused to die)")
+        elif code:
             # Assume if ffprobe failed, it's only temporary (file not downloaded enough yet).
             log.info("No video file metadata available (yet) for %s: [%s]" % (path, code))
             log.debug("out='%s'\nerr='%s'" % (out, err))
-            media_info['complete'] = False
         else:
             data = json.loads(out)
             info = []
+            media_info['files'][path] = {
+                'complete': "misdetection possible" not in err
+            }
 
             for stream in data['streams']:
                 stream_info = []
@@ -140,10 +155,8 @@ class Core(CorePluginBase):
                 if 'channels' in stream:
                     stream_info += ["%sch" % stream['channels']]
                 if 'tags' in stream and 'language' in stream['tags']:
-                    stream_info += ["%s" % stream['tags']['language']]
+                    stream_info += [stream['tags']['language']]
                 stream_info = " ".join(stream_info)
                 info.append(stream_info)
 
-            media_info['files'][path] = " | ".join(info)
-
-        return media_info
+            media_info['files'][path]['streams'] = " | ".join(info)
