@@ -20,7 +20,7 @@ from setuptools import find_packages, setup
 
 __plugin_name__ = 'MediaInfo'
 __author__ = 'David Feltell'
-__author_email__ = 'dave@feltell.net'
+__author_email__ = 'https://github.com/feltech'
 __version__ = '0.1'
 __url__ = ''
 __license__ = 'GPLv3'
