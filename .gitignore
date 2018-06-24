@@ -7,3 +7,4 @@ GRTAGS
 GTAGS
 **/*.swp
 **/*.pyc
+.settings
